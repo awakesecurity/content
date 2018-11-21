@@ -349,7 +349,8 @@ script:
 
         humanReadable = displayTable(contents, humanReadableFields)
 
-        contents["query"] = q
+        for content in contents:
+            content["query"] = q
 
         returnResults(contents, "Activities", "query", humanReadable, None)
 
@@ -372,7 +373,8 @@ script:
 
         humanReadable = displayTable(contents, humanReadableFields)
 
-        contents["query"] = q
+        for content in contents:
+            content["query"] = q
 
         returnResults(contents, "Devices", "query", humanReadable, None)
 
@@ -396,7 +398,8 @@ script:
 
         humanReadable = displayTable(contents, humanReadableFields)
 
-        contents["query"] = q
+        for content in contents:
+            content["query"] = q
 
         returnResults(contents, "Domains", "query", humanReadable, None)
 
