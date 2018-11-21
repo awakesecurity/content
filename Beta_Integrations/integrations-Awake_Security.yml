@@ -60,6 +60,7 @@ script:
     import re
     import requests
 
+    requests.packages.urllib3.disable_warnings()
 
     params = demisto.params()
     address = params["address"]
@@ -77,7 +78,6 @@ script:
     headers = {
         "Authentication": ("access " + authToken)
     }
-
     command = demisto.command()
     args = demisto.args()
     request = {}
@@ -124,47 +124,39 @@ script:
         else:
             return "Empty results"
 
-    def returnResults(contents, humanReadable, dbotScore):
+    def returnResults(contents, outerKey, innerKey, humanReadable, dbotScore):
         machineReadable = {
             "AwakeSecurity": contents,
         }
+
+        entryContext = {
+            ("AwakeSecurity." + outerKey + "(val." + innerKey + "===obj." + innerKey + ")"): contents,
+        }
+
         if dbotScore is not None:
             machineReadable["DBotScore"] = dbotScore
+            entryContext["DBotScore"] = dbotScore
+
         results = {
             "Type": 1,
             "ContentsFormat": "json",
             "Contents": json.dumps(machineReadable),
             "HumanReadable": humanReadable,
             "ReadableContentsFormat": "markdown",
+            "EntryContext": entryContext,
         }
+
         demisto.results(results)
 
     def toDBotScore(indicator_type, percentile, lookup_key):
-        # Demisto's score - 0:unknown, 1:ok, 2:suspicous, 3:bad
-        #
-        # Our scores range from 0 to 100, where higher
-        # scores mean more unusual behavior
-        #
-        # Our product does not yet assign meaning
-        # to these scores since unusual behavior is
-        # not necessarily malicious, but empirically
-        # partioning the scores by quartile appears to
-        # map closely enough to Demisto's classification
-        # scheme for now.
-        if percentile <= args['min_threshold']:
-            # People doing something out of the ordinary
-            # compared to others (i.e. performing weird
-            # searches, learning something exotic, making
-            # an unusual purchase)
+        if percentile <= 33:
             score = 1
-        elif percentile <= args['max_threshold']:
-            # Something doing multiple things out of the
-            # ordinary, worth investigating
+        elif percentile <= 67:
+            # Something doing something out of the ordinary
             score = 2
         else:
             # Probably bad or at least not compliant with
-            # company policy.  You have to make an effort
-            # to score this high.
+            # company policy.
             score = 3
         return {
             "Vendor": "Awake Security",
@@ -185,6 +177,7 @@ script:
 
     def lookupDevice(lookup_key):
         contents = lookup("device", lookup_key)
+
         humanReadableFields = [
             "deviceScore",
             "deviceName",
@@ -203,6 +196,7 @@ script:
             "firstSeen",
             "lastSeen",
         ]
+
         if "deviceScore" in contents:
             dbotScore = toDBotScore("device", contents["deviceScore"], lookup_key)
         else:
@@ -212,11 +206,16 @@ script:
                 "Indicator": lookup_key,
                 "Score": 0
             }
+
         humanReadable = displayTable([contents], humanReadableFields)
-        returnResults(contents, humanReadable, dbotScore)
+
+        contents["device"] = lookup_key
+
+        returnResults(contents, "Devices", "device", humanReadable, dbotScore)
 
     def lookupDomain(lookup_key):
         contents = lookup("domain", lookup_key)
+
         humanReadableFields = [
             "notability",
             "isAlexaTopOneMillion",
@@ -229,6 +228,7 @@ script:
             "firstSeen",
             "lastSeen",
         ]
+
         if "notability" in contents:
             dbotScore = toDBotScore("domain", contents["notability"], lookup_key)
         else:
@@ -238,11 +238,16 @@ script:
                 "Indicator": lookup_key,
                 "Score": 0
             }
+
         humanReadable = displayTable([contents], humanReadableFields)
-        returnResults(contents, humanReadable, dbotScore)
+
+        contents["domain"] = lookup_key
+
+        returnResults(contents, "Domains", "domain", humanReadable, dbotScore)
 
     def lookupEmail(lookup_key):
         contents = lookup("email", lookup_key)
+
         humanReadableFields = [
             "notabilityPercentile",
             "deviceName",
@@ -256,6 +261,7 @@ script:
             "duration",
             "deviceId",
         ]
+
         if "notabilityPercentile" in contents:
             dbotScore = toDBotScore("email", contents["notabilityPercentile"], lookup_key)
         else:
@@ -265,27 +271,37 @@ script:
                 "Indicator": lookup_key,
                 "Score": 0
             }
+
         humanReadable = displayTable(contents, humanReadableFields)
-        returnResults(contents, humanReadable, dbotScore)
+
+        contents["email"] = lookup_key
+
+        returnResults(contents, "Email", "email", humanReadable, dbotScore)
 
     def lookupIp(lookup_key):
         contents = lookup("ip", lookup_key)
+
         humanReadableFields = [
             "deviceCount",
             "activityCount",
             "ipFirstSeen",
             "ipLastSeen",
         ]
+
         dbotScore = {
-                "Vendor": "Awake Security",
-                "Type": 'ip',
-                "Indicator": lookup_key,
-                "Score": 0
-            }
+            "Vendor": "Awake Security",
+            "Type": 'ip',
+            "Indicator": lookup_key,
+            "Score": 0
+        }
+
         # Note: No DBotScore for IP addresses as we do not score them.
         # Our product scores devices rather than IP addresses.
         humanReadable = displayTable([contents], humanReadableFields)
-        returnResults(contents, humanReadable, dbotScore)
+
+        contents["ip"] = lookup_key
+
+        returnResults(contents, "IPs", "ip", humanReadable, dbotScore)
 
     def query(lookup_type):
         # Default to an empty query if unset
@@ -307,10 +323,12 @@ script:
         path = "/query/" + lookup_type
         response = requests.post(prefix + path, json=request, headers=headers, verify=verify)
         contents = response.json()
-        return contents
+
+        return request["queryExpression"], contents
 
     def queryActivities():
-        contents = query("activities")
+        q, contents = query("activities")
+
         humanReadableFields = [
             "sourceIP",
             "sourceHost",
@@ -323,11 +341,16 @@ script:
             "activityEnd",
             "protocols",
         ]
+
         humanReadable = displayTable(contents, humanReadableFields)
-        returnResults(contents, humanReadable, None)
+
+        contents["activity"] = q
+
+        returnResults(contents, "Activities", "activity", humanReadable, None)
 
     def queryDevices():
-        contents = query("devices")
+        q, contents = query("devices")
+
         humanReadableFields = [
             "notabilityPercentile",
             "deviceName",
@@ -341,11 +364,16 @@ script:
             "duration",
             "deviceId",
         ]
+
         humanReadable = displayTable(contents, humanReadableFields)
-        returnResults(contents, humanReadable, None)
+
+        contents["device"] = q
+
+        returnResults(contents, "Devices", "device", humanReadable, None)
 
     def queryDomains():
-        contents = query("domains")
+        q, contents = query("domains")
+
         humanReadableFields = [
             "name",
             "notability",
@@ -360,8 +388,12 @@ script:
             "intelCount",
             "lastSeen",
         ]
+
         humanReadable = displayTable(contents, humanReadableFields)
-        returnResults(contents, humanReadable, None)
+
+        contents["domain"] = q
+
+        returnResults(contents, "Domains", "domain", humanReadable, None)
 
     def pcapDownload():
         slurp(["monitoringPointID"])
@@ -431,43 +463,31 @@ script:
 
     ''' EXECUTION '''
     LOG('command is %s' % (command))
-
     try:
         if command == "test-module":
             # If we got this far we already successfully authenticated against the server
             demisto.results('ok')
-
         elif command == "fetch-incidents":
             fetchIncidents()
-
         elif command == "awake-query-devices":
             queryDevices()
-
         elif command == "awake-query-activities":
             queryActivities()
-
         elif command == "awake-query-domains":
             queryDomains()
-
         elif command == "awake-pcap-download":
             pcapDownload()
-
         elif command == "domain":
             lookupDomain(args["domain"])
-
         elif command == "email":
-            lookupDomain(args["email"])
-
+            lookupEmail(args["email"])
         elif command == "ip":
             lookupIp(args["ip"])
-
         elif command == "device":
             lookupDevice(args["device"])
-
     except Exception, e:
         LOG(e.message)
         LOG.print_log()
-        return_error(e.message)
   type: python
   commands:
   - name: awake-query-devices
@@ -557,6 +577,70 @@ script:
       description: The domain name
     - name: lookback_minutes
       description: How many minutes of history to query
+    outputs:
+    - contextPath: AwakeSecurity.Domains.domain.approxBytesTransferred
+      description: Approximate bytes the indicator passed
+      type: number
+    - contextPath: AwakeSecurity.Domains.domain.DomainWithSameRegistrant
+      description: Domain with same registrant to the domain
+      type: unknown
+    - contextPath: AwakeSecurity.Domains.domain.DomainWithSameRegistrant.firstSeen
+      description: First time the domain with same registrant to the domain was seen
+      type: string
+    - contextPath: AwakeSecurity.Domains.domain.IntelSources
+      description: Intel sources
+      type: string
+    - contextPath: AwakeSecurity.Domains.domain.ipAddresses
+      description: Ip addresses
+      type: string
+    - contextPath: AwakeSecurity.Domains.domain.isAlexaTopOneMillion
+      description: Alexa data
+      type: string
+    - contextPath: AwakeSecurity.Domains.domain.isDGA
+      description: is the indicator DGA
+      type: boolean
+    - contextPath: AwakeSecurity.Domains.domain.lastSeen
+      description: Last time the indicator was seen
+      type: string
+    - contextPath: AwakeSecurity.Domains.domain.notabillity
+      description: Notability score
+      type: number
+    - contextPath: AwakeSecurity.Domains.domain.numAssociatedActivities
+      description: Number of associated activities
+      type: number
+    - contextPath: AwakeSecurity.Domains.domain.numAssociatedADevices
+      description: Number of associated devices
+      type: number
+    - contextPath: AwakeSecurity.Domains.domain.protocols
+      description: Related protocols
+      type: string
+    - contextPath: AwakeSecurity.Domains.domain.relatedSubdomains
+      description: Related subdomains
+      type: string
+    - contextPath: AwakeSecurity.Domains.domain.subdomains
+      description: Subdomains
+      type: string
+    - contextPath: AwakeSecurity.Domains.domain.topDevices
+      description: Top Devices
+      type: string
+    - contextPath: AwakeSecurity.Domains.domain.totalNumDevices
+      description: Total number of devices
+      type: number
+    - contextPath: AwakeSecurity.Domains.domain.whiteListed
+      description: Is in white list
+      type: boolean
+    - contextPath: DBotScore.Indicator
+      description: Indicator of the domain
+      type: string
+    - contextPath: DBotScore.Score
+      description: Score of the domain
+      type: number
+    - contextPath: DBotScore.Type
+      description: Type of the indicator
+      type: string
+    - contextPath: DBotScore.Vendor
+      description: Vendor of the data
+      type: string
     description: Lookup a domain
   - name: ip
     arguments:
@@ -565,6 +649,37 @@ script:
       description: The IP address
     - name: lookback_minutes
       description: How many minutes of history to query
+    outputs:
+    - contextPath: AwakeSecurity.IPs.ip.activityCount
+      description: Activity count of the ip
+      type: number
+    - contextPath: AwakeSecurity.IPs.ip.deviceCount
+      description: device count of the ip
+      type: number
+    - contextPath: AwakeSecurity.IPs.ip.devices
+      description: Devices of the ip
+      type: unknown
+    - contextPath: AwakeSecurity.IPs.ip.domains
+      description: domains of the ip
+      type: unknown
+    - contextPath: AwakeSecurity.IPs.ip.ipFirstSeen
+      description: First time the ip was seen
+      type: string
+    - contextPath: AwakeSecurity.IPs.ip.ipLastSeen
+      description: Last time the ip was seen
+      type: string
+    - contextPath: DBotScore.Indicator
+      description: Indicator of the ip
+      type: string
+    - contextPath: DBotScore.Score
+      description: Score of the ip
+      type: number
+    - contextPath: DBotScore.Vendor
+      description: Vendor of the data
+      type: string
+    - contextPath: DBotScore.Type
+      description: Type of the indicator
+      type: string
     description: Lookup an IP address
   - name: email
     arguments:
@@ -572,6 +687,61 @@ script:
       description: The email address
     - name: lookback_minutes
       description: How many minutes of history to query
+    outputs:
+    - contextPath: AwakeSecurity.Emails.email.deviceId
+      description: Device ID associated with this email address
+      type: string
+    - contextPath: AwakeSecurity.Emails.email.deviceName
+      description: Device name associated with this email address
+      type: string
+    - contextPath: AwakeSecurity.Emails.email.firstSeen
+      description: Time this email address was first seen
+      type: string
+    - contextPath: AwakeSecurity.Emails.email.lastSeen
+      description: Time this email address was last seen
+      type: string
+    - contextPath: AwakeSecurity.Emails.email.duration
+      description: Duration that this email address was seen
+      type: string
+    - contextPath: AwakeSecurity.Emails.email.os
+      description: Operating system associated with this email address
+      type: string
+    - contextPath: AwakeSecurity.Emails.email.deviceType
+      description: Device type associated with this email address
+      type: string
+    - contextPath: AwakeSecurity.Emails.email.ips
+      description: IP addresses associated with this email address
+      type: unknown
+    - contextPath: AwakeSecurity.Emails.email.monitoringPointIds
+      description: Monitoring points that this email address was seen on
+      type: string
+    - contextPath: AwakeSecurity.Emails.email.application
+      description: Email application(s) associated with this email address
+      type: unknown
+    - contextPath: AwakeSecurity.Emails.email.notabilityPercentile
+      description: Notability of this email address (higher means more unusual activity)
+      type: number
+    - contextPath: AwakeSecurity.Emails.email.numberSimilarDevices
+      description: Number of similar devices associated with this email addresses
+      type: number
+    - contextPath: AwakeSecurity.Emails.email.numberSessions
+      description: Number of TCP sessions associated with this email address
+      type: number
+    - contextPath: AwakeSecurity.Emails.email.ackTime
+      description: Time of last TCP acknowledgment associated with this email address
+      type: string
+    - contextPath: AwakeSecurity.Emails.email.whiteListed
+      description: Is this email address whitelisted?
+      type: bool
+    - contextPath: DBotScore.Score
+      description: Score of the domain
+      type: number
+    - contextPath: DBotScore.Type
+      description: Type of the indicator
+      type: string
+    - contextPath: DBotScore.Vendor
+      description: Vendor of the data
+      type: string
     description: Lookup an email address
   - name: device
     arguments:
@@ -580,7 +750,121 @@ script:
       description: The device ID
     - name: lookback_minutes
       description: How many minutes of history to query
+    outputs:
+    - contextPath: AwakeSecurity.Devices.device.deviceScore
+      description: Score for the device (higher means more unusual activity)
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.notableDomainCount.value
+      description: Number of suspect destinations associated with this device
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.notableDomainCount.percentile
+      description: How this device compares to other devices with respect to suspect destinations
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.notableDomainCount.weight
+      description: How much suspect destinations contributed to the device's score
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.iocCount.value
+      description: Number of IOCs associated with this device
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.iocCount.percentile
+      description: How this device compares to other devices with respect to IOCs
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.iocCount.weight
+      description: How much IOCs contributed to the device's score
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.watchlistCount.value
+      description: Number of threat behaviors associated with this device
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.watchlistCount.percentile
+      description: How this device compares to other devices with respect to threat behaviors
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.watchlistCount.weight
+      description: How much threat behaviors contributed to the device's score
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.activityCount.value
+      description: Number of characteristic artifacts associated with this device
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.activityCount.percentile
+      description: How this device compares to other devices with respect to characteristic artifacts
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.activityCount.weight
+      description: How much characteristic artifacts contributed to the device's score
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.deviceName
+      description: Name of the device
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.deviceType
+      description: Type of device
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.os
+      description: Operating system associated with the device
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.recentIp
+      description: Most recent IP address associated with the device
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.activeIp
+      description: Most common IP address associated with the device
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.commonEmail
+      description: Most common email address associated with the device
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.commonUsername
+      description: Most common username associated with the device
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.commonMpid
+      description: Most common monitoring point the device was seen on
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.nSimilarDevices
+      description: How many other devices are similar to this one
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.tags
+      description: Tags associated with this device
+      type: unknown
+    - contextPath: AwakeSecurity.Devices.device.ipCount
+      description: Number of IP addresses associated with this device
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.emailCount
+      description: Number of email addresses associated with this device
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.usernameCount
+      description: Number of usernames associated with this device
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.applicationCount
+      description: Number of applications associated with this device
+      type: number
+    - contextPath: AwakeSecurity.Devices.device.mpids
+      description: List of monitoring points associated with this device
+      type: unknown
+    - contextPath: AwakeSecurity.Devices.device.protocols
+      description: Protocols and their counts associated with this device
+      type: unknown
+    - contextPath: AwakeSecurity.Devices.device.firstSeen
+      description: Time that this device was first seen
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.lastSeen
+      description: Time that this device was last seen
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.osVersion
+      description: Operating system version
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.deviceGuid
+      description: UUID that the Awake Security product uses to uniquely identify this device
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.ips
+      description: List of IP addresses and metadata associated with this device
+      type: unknown
+    - contextPath: AwakeSecurity.Devices.device.usernames
+      description: List of usernames associated with this device
+      type: unknown
+    - contextPath: AwakeSecurity.Devices.device.emails
+      description: List of emails associated with this device
+      type: unknown
+    - contextPath: AwakeSecurity.Devices.device.ackTs
+      description: Time of last TCP acknowledgment associated with this device
+      type: string
+    - contextPath: AwakeSecurity.Devices.device.ackTs
+      description: Is this device whitelisted?
+      type: bool
     description: Lookup a device
   isfetch: true
   runonce: false
-releaseNotes: "-"
