@@ -274,7 +274,8 @@ script:
 
         humanReadable = displayTable(contents, humanReadableFields)
 
-        contents["email"] = lookup_key
+        for content in contents:
+            content["email"] = lookup_key
 
         returnResults(contents, "Email", "email", humanReadable, dbotScore)
 
@@ -306,7 +307,9 @@ script:
     def query(lookup_type):
         # Default to an empty query if unset
         request["queryExpression"] = ""
+
         slurp(["queryExpression", "startTime", "endTime"])
+
         nameMappings = [
             ("ipAddress","device.ip == {}"),
             ("deviceName","device.name like r/{}/"),
@@ -314,12 +317,14 @@ script:
             ("protocol", "activity.protocol == \"{}\""),
             ("tags","\"{}\" in device.tags"),
         ]
+
         for (name, mapping) in nameMappings:
             if name in args:
                 if "queryExpression" in request and request["queryExpression"]:
                     request["queryExpression"] = request["queryExpression"] + " && " + mapping.format(args[name])
                 else:
                     request["queryExpression"] = mapping.format(args[name])
+
         path = "/query/" + lookup_type
         response = requests.post(prefix + path, json=request, headers=headers, verify=verify)
         contents = response.json()
@@ -344,9 +349,9 @@ script:
 
         humanReadable = displayTable(contents, humanReadableFields)
 
-        contents["activity"] = q
+        contents["query"] = q
 
-        returnResults(contents, "Activities", "activity", humanReadable, None)
+        returnResults(contents, "Activities", "query", humanReadable, None)
 
     def queryDevices():
         q, contents = query("devices")
@@ -367,9 +372,9 @@ script:
 
         humanReadable = displayTable(contents, humanReadableFields)
 
-        contents["device"] = q
+        contents["query"] = q
 
-        returnResults(contents, "Devices", "device", humanReadable, None)
+        returnResults(contents, "Devices", "query", humanReadable, None)
 
     def queryDomains():
         q, contents = query("domains")
@@ -391,9 +396,9 @@ script:
 
         humanReadable = displayTable(contents, humanReadableFields)
 
-        contents["domain"] = q
+        contents["query"] = q
 
-        returnResults(contents, "Domains", "domain", humanReadable, None)
+        returnResults(contents, "Domains", "query", humanReadable, None)
 
     def pcapDownload():
         slurp(["monitoringPointID"])
@@ -510,6 +515,49 @@ script:
       description: Protocol (all uppercase, i.e. "TLS")
     - name: tag
       description: Tag to match (Regular expression)
+    outputs:
+    - contextPath: AwakeSecurity.Devices.query.deviceId
+      description: UUID that uniquely identifies the device
+      type: string
+    - contextPath: AwakeSecurity.Devices.query.deviceName
+      description: Name of the device
+      type: string
+    - contextPath: AwakeSecurity.Devices.query.firstSeen
+      description: Time that the device was first seen
+      type: string
+    - contextPath: AwakeSecurity.Devices.query.lastSeen
+      description: Time that the device was last seen
+      type: string
+    - contextPath: AwakeSecurity.Devices.query.os
+      description: Operating system
+      type: string
+    - contextPath: AwakeSecurity.Devices.query.deviceType
+      description: Type of device
+      type: string
+    - contextPath: AwakeSecurity.Devices.query.ips
+      description: List of IP addresses the device was seen using
+      type: unknown
+    - contextPath: AwakeSecurity.Devices.query.monitoringPointIds
+      description: List of monitoring points the device was seen on
+      type: unknown
+    - contextPath: AwakeSecurity.Devices.query.application
+      description: List of applications the device was seen using
+      type: unknown
+    - contextPath: AwakeSecurity.Devices.query.notabilityPercentile
+      description: How the notability of this device compares to other devices
+      type: number
+    - contextPath: AwakeSecurity.Devices.query.numberSimilarDevices
+      description: The number of other devices similar to this one
+      type: number
+    - contextPath: AwakeSecurity.Devices.query.numberSessions
+      description: Number of TCP sessions for this device
+      type: number
+    - contextPath: AwakeSecurity.Devices.query.ackTime
+      description: Time of last TCP acknowledgement seen for this device
+      type: number
+    - contextPath: AwakeSecurity.Devices.query.whiteListed
+      description: Is this device whitelisted?
+      type: bool
     description: Query devices
   - name: awake-query-activities
     arguments:
@@ -531,6 +579,46 @@ script:
       description: Protocol (all uppercase, i.e. "TLS")
     - name: tag
       description: Tag to match (Regular expression)
+    outputs:
+    - contextPath: AwakeSecurity.Activities.query.activityId
+      description: UUID that uniquely identifies the activity
+      type: string
+    - contextPath: AwakeSecurity.Activities.query.sessionId
+      description: UUID that uniquely identifies the corresponding session
+      type: string
+    - contextPath: AwakeSecurity.Activities.query.sourceIP
+      description: IP address of the source
+      type: string
+    - contextPath: AwakeSecurity.Activities.query.sourceHost
+      description: Hostname of the source
+      type: string
+    - contextPath: AwakeSecurity.Activities.query.sourcePort
+      description: Port of the source
+      type: number
+    - contextPath: AwakeSecurity.Activities.query.destinationIP
+      description: IP address of the destination
+      type: string
+    - contextPath: AwakeSecurity.Activities.query.destinationHost
+      description: Hostname of the destination
+      type: string
+    - contextPath: AwakeSecurity.Activities.query.destinationPort
+      description: Port of the destination
+      type: number
+    - contextPath: AwakeSecurity.Activities.query.directionKnown
+      description: Do we know for sure which endpoint was the client?
+      type: bool
+    - contextPath: AwakeSecurity.Activities.query.activityDeviceName
+      description: Device name for the endpoint within your network
+      type: string
+    - contextPath: AwakeSecurity.Activities.query.activityStart
+      description: Time when the activity began
+      type: string
+    - contextPath: AwakeSecurity.Activities.query.activityEnd
+      description: Time when the activity ended
+      type: string
+    - contextPath: AwakeSecurity.Activities.query.protocols
+      description: Protocols that the activity used
+      type: unknown
     description: Query activities
   - name: awake-query-domains
     arguments:
@@ -552,6 +640,52 @@ script:
       description: Protocol (all uppercase, i.e. "TLS")
     - name: tag
       description: Tag to match (Regular expression)
+    outputs:
+    - contextPath: AwakeSecurity.Domains.query.name
+      description: Name of the domain
+      type: string
+    - contextPath: AwakeSecurity.Domains.query.created
+      description: Time the domain was created
+      type: string
+    - contextPath: AwakeSecurity.Domains.query.lastUpdated
+      description: Time the domain was last updated
+      type: string
+    - contextPath: AwakeSecurity.Domains.query.registrantOrg
+      description: Organization of the registrant
+      type: string
+    - contextPath: AwakeSecurity.Domains.query.registrantCountry
+      description: Country of the registrant
+      type: string
+    - contextPath: AwakeSecurity.Domains.query.registrarName
+      description: Name of the registrar
+      type: string
+    - contextPath: AwakeSecurity.Domains.query.whoisServer
+      description: Address of the WHOIS server
+      type: string
+    - contextPath: AwakeSecurity.Domains.query.whoisFound
+      description: Was this domain found via WHOIS?
+      type: bool
+    - contextPath: AwakeSecurity.Domains.query.deviceCount
+      description: Number of devices currently interacting with this domain
+      type: number
+    - contextPath: AwakeSecurity.Domains.query.totalDevices
+      description: Total number of devices that have interacted with this domain
+      type: number
+    - contextPath: AwakeSecurity.Domains.query.intelCount
+      description: Number of matches of imported intel against this domain
+      type: number
+    - contextPath: AwakeSecurity.Domains.query.lastSeen
+      description: Time of the most recent interaction with that domain
+      type: number
+    - contextPath: AwakeSecurity.Domains.query.nameservers
+      description: List of authoritative nameservers for that domain
+      type: unknown
+    - contextPath: AwakeSecurity.Domains.query.notability
+      description: Notability of the domain (higher means more unusual activity)
+      type: number
+    - contextPath: AwakeSecurity.Domains.query.whiteListed
+      description: Is this domain whitelisted?
+      type: bool
     description: Query domains
   - name: awake-pcap-download
     arguments:
@@ -758,7 +892,8 @@ script:
       description: Number of suspect destinations associated with this device
       type: number
     - contextPath: AwakeSecurity.Devices.device.notableDomainCount.percentile
-      description: How this device compares to other devices with respect to suspect destinations
+      description: How this device compares to other devices with respect to suspect
+        destinations
       type: number
     - contextPath: AwakeSecurity.Devices.device.notableDomainCount.weight
       description: How much suspect destinations contributed to the device's score
@@ -776,7 +911,8 @@ script:
       description: Number of threat behaviors associated with this device
       type: number
     - contextPath: AwakeSecurity.Devices.device.watchlistCount.percentile
-      description: How this device compares to other devices with respect to threat behaviors
+      description: How this device compares to other devices with respect to threat
+        behaviors
       type: number
     - contextPath: AwakeSecurity.Devices.device.watchlistCount.weight
       description: How much threat behaviors contributed to the device's score
@@ -785,7 +921,8 @@ script:
       description: Number of characteristic artifacts associated with this device
       type: number
     - contextPath: AwakeSecurity.Devices.device.activityCount.percentile
-      description: How this device compares to other devices with respect to characteristic artifacts
+      description: How this device compares to other devices with respect to characteristic
+        artifacts
       type: number
     - contextPath: AwakeSecurity.Devices.device.activityCount.weight
       description: How much characteristic artifacts contributed to the device's score
@@ -848,7 +985,8 @@ script:
       description: Operating system version
       type: string
     - contextPath: AwakeSecurity.Devices.device.deviceGuid
-      description: UUID that the Awake Security product uses to uniquely identify this device
+      description: UUID that the Awake Security product uses to uniquely identify
+        this device
       type: string
     - contextPath: AwakeSecurity.Devices.device.ips
       description: List of IP addresses and metadata associated with this device
